@@ -1,0 +1,38 @@
+.usent-marker {
+  display: inline-block;
+  font-family: monospace;
+  font-size: 85%;
+  border-radius: 3px;
+  padding: 0 3px;
+  cursor: default;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+.usent-t1 { background: #dc2626; color: #fff; }
+.usent-t2 { background: #f59e0b; color: #000; }
+.usent-t3 { background: #6b7280; color: #fff; }
+
+#usent-banner {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 2147483647;
+  padding: 8px 16px;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.usent-banner-critical { background: #dc2626; color: #fff; }
+.usent-banner-high     { background: #f59e0b; color: #000; }
+.usent-banner-info     { background: #6b7280; color: #fff; }
+
+#usent-banner button {
+  padding: 2px 10px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 12px;
+}

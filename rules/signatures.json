@@ -1,0 +1,34 @@
+[
+  {
+    "id": "GW-DECODE-01",
+    "version": 1,
+    "description": "Glassworm-style decoder: codePointAt + FE00/E0100 range check + dynamic code execution sink",
+    "pattern_type": "compound",
+    "confidence": "critical",
+    "scope": "text_content"
+  },
+  {
+    "id": "GW-DECODE-02",
+    "version": 1,
+    "description": "8+ consecutive Tier-1 codepoints (variation selectors or PUA) in text",
+    "pattern_type": "compound",
+    "confidence": "high",
+    "scope": "text_content"
+  },
+  {
+    "id": "BIDI-FLIP-01",
+    "version": 1,
+    "description": "Unclosed bidi override (RLO/LRO/RLI/LRI) in code",
+    "pattern_type": "compound",
+    "confidence": "high",
+    "scope": "text_content"
+  },
+  {
+    "id": "ZW-BULK-01",
+    "version": 1,
+    "description": "16+ zero-width characters in a contiguous run",
+    "pattern_type": "compound",
+    "confidence": "high",
+    "scope": "text_content"
+  }
+]
