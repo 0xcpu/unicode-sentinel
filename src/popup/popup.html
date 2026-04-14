@@ -17,14 +17,33 @@
   </style>
 </head>
 <body>
-  <div id="status"><div id="dot" class="dot green"></div><span id="status-text">Scanning…</span></div>
-  <div id="tier-counts" style="font-size:13px;color:#555"></div>
-  <div id="sig-matches"></div>
-  <div id="findings-list"></div>
-  <div id="controls">
-    <button id="btn-toggle">Toggle markers</button>
-    <button id="btn-export">Export report</button>
+  <div id="status"><div id="dot" class="dot green"></div><span id="status-text">Ready.</span></div>
+
+  <div id="scan-empty" style="display:none">
+    <p style="font-size:13px;color:#555;margin:10px 0 8px">Click to scan this page for invisible Unicode characters.</p>
+    <button id="scan-btn" style="font-size:13px;padding:6px 14px;cursor:pointer">Scan this page</button>
   </div>
+
+  <div id="scanning" style="display:none">
+    <span id="scanning-spinner" style="font-size:13px;color:#555">Scanning…</span>
+  </div>
+
+  <div id="scanned" style="display:none">
+    <div id="tier-counts" style="font-size:13px;color:#555"></div>
+    <div id="sig-matches"></div>
+    <div id="findings-list"></div>
+    <div id="controls">
+      <button id="rescan-btn">Rescan this page</button>
+      <button id="btn-toggle">Toggle markers</button>
+      <button id="btn-export">Export report</button>
+    </div>
+  </div>
+
+  <div id="scan-failed" style="display:none">
+    <p style="font-size:13px;color:#b45309;margin:10px 0 8px">Scan didn't finish. Try again?</p>
+    <button id="retry-btn" style="font-size:13px;padding:6px 14px;cursor:pointer">Scan this page</button>
+  </div>
+
   <script src="src/popup/popup.js"></script>
 </body>
 </html>

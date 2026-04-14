@@ -4,7 +4,6 @@ export const DEFAULTS = {
   inline_markers_enabled: true,
   group_threshold: 4,
   tier_overrides: {},
-  site_allowlist: [],
   export_redact_urls: false,
   export_strip_context: false,
   signature_ruleset_url: "",

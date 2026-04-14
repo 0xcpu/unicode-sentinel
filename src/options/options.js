@@ -9,7 +9,6 @@ async function init() {
   document.getElementById("export_redact_urls").checked = s.export_redact_urls;
   document.getElementById("export_strip_context").checked = s.export_strip_context;
   document.getElementById("signature_ruleset_url").value = s.signature_ruleset_url;
-  document.getElementById("site_allowlist").value = s.site_allowlist.join("\n");
 
   document.getElementById("save-btn").addEventListener("click", async () => {
     const updates = {
@@ -20,7 +19,6 @@ async function init() {
       export_redact_urls: document.getElementById("export_redact_urls").checked,
       export_strip_context: document.getElementById("export_strip_context").checked,
       signature_ruleset_url: document.getElementById("signature_ruleset_url").value.trim(),
-      site_allowlist: document.getElementById("site_allowlist").value.split("\n").map(s => s.trim()).filter(Boolean),
     };
     for (const [k, v] of Object.entries(updates)) await setSetting(k, v);
     const msg = document.getElementById("saved-msg");
