@@ -5,12 +5,20 @@ import { matchSignatures } from "../shared/signatures.js";
 import { getSettings } from "../shared/storage.js";
 import { makeIntersectionObserver, makeMutationObserver } from "./observer.js";
 import {
-  assignFindingIds, setScannedText, getScannedText, removeScannedText,
+  assignFindingIds,
+  setScannedText,
+  getScannedText,
+  removeScannedText,
 } from "./content-state.js";
 
 const CODE_SEL = [
-  "pre", "code", '[class*="highlight"]', '[class*="blob-code"]',
-  '[class*="diff"]', ".changed", "[data-diff-type]",
+  "pre",
+  "code",
+  '[class*="highlight"]',
+  '[class*="blob-code"]',
+  '[class*="diff"]',
+  ".changed",
+  "[data-diff-type]",
 ].join(",");
 
 const processed = new WeakSet();
@@ -27,7 +35,7 @@ let settings = {};
 // marker spans inside CODE_SEL elements would be observed, dispatched to
 // onChanged, and trigger infinite re-scan feedback loops.
 //
-// Note: we intentionally do NOT watch `characterData` at the body level —
+// Note: we intentionally do NOT watch `characterData` at the body level -
 // that fires on every text tick, timer, input character, React render, etc.
 // across the entire page, producing callback storms that freeze the browser.
 // In-place text edits inside processed code blocks are caught by per-element
@@ -35,8 +43,18 @@ let settings = {};
 let mo = null;
 const MO_CONFIG = { childList: true, subtree: true };
 
+// True while we're walking many elements in one go (initial sweep, RESCAN).
+// Per-batch signature recomputation is O(N) over total scanned text; doing
+// it for every element during a sweep is O(N^2). With this flag set,
+// sendFindings ships findings without sigMatches and the caller follows up
+// with one SIGNATURES_UPDATE at the end.
+let bulkScanInProgress = false;
+
 function withSuspendedObserver(fn) {
-  if (!mo) { fn(); return; }
+  if (!mo) {
+    fn();
+    return;
+  }
   mo.disconnect();
   try {
     fn();
@@ -71,28 +89,37 @@ export async function init() {
   if (window.__usent_installed) return;
   window.__usent_installed = true;
   settings = await getSettings();
-  const roots = settings.scan_scope === "full_page"
-    ? [document.body]
-    : Array.from(document.querySelectorAll(CODE_SEL));
+  const roots =
+    settings.scan_scope === "full_page"
+      ? [document.body]
+      : Array.from(document.querySelectorAll(CODE_SEL));
 
+  bulkScanInProgress = true;
   for (const el of roots) scanElement(el);
+  bulkScanInProgress = false;
+  flushSignaturesAndBanner();
 
   const io = makeIntersectionObserver(scanElement);
   mo = makeMutationObserver({
     onAdded: (el) => {
-      const nodes = el.matches?.(CODE_SEL) ? [el] : Array.from(el.querySelectorAll(CODE_SEL));
+      const nodes = el.matches?.(CODE_SEL)
+        ? [el]
+        : Array.from(el.querySelectorAll(CODE_SEL));
       for (const n of nodes) {
         if (processed.has(n)) rescanElement(n);
         else io.observe(n);
       }
     },
     onChanged: (el) => {
-      // text inside an already-processed element changed — re-scan it
-      const target = el.closest?.(CODE_SEL) ?? (el.matches?.(CODE_SEL) ? el : null);
+      // text inside an already-processed element changed - re-scan it
+      const target =
+        el.closest?.(CODE_SEL) ?? (el.matches?.(CODE_SEL) ? el : null);
       if (target && processed.has(target)) rescanElement(target);
     },
     onRemoved: (el) => {
-      const nodes = el.matches?.(CODE_SEL) ? [el] : Array.from(el.querySelectorAll(CODE_SEL));
+      const nodes = el.matches?.(CODE_SEL)
+        ? [el]
+        : Array.from(el.querySelectorAll(CODE_SEL));
       for (const n of nodes) {
         if (processed.has(n)) forgetElement(n);
       }
@@ -101,7 +128,7 @@ export async function init() {
   for (const el of roots) io.observe(el);
   mo.observe(document.body, MO_CONFIG);
 
-  // S5: Settings reload — apply changes without requiring page reload.
+  // S5: Settings reload - apply changes without requiring page reload.
   chrome.storage.onChanged.addListener((changes) => {
     for (const key of Object.keys(changes)) {
       if (key in settings) {
@@ -120,6 +147,7 @@ function getOrAssignElementId(el) {
 }
 
 function scanAndEnrich(el, elemId) {
+  const sel = cssPath(el);
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   let node;
   const elementFindings = [];
@@ -128,15 +156,19 @@ function scanAndEnrich(el, elemId) {
     const findings = scanText(text);
     if (!findings.length) continue;
     if (settings.inline_markers_enabled) {
-      const frag = buildFragment(node, findings, { groupThreshold: settings.group_threshold });
+      const frag = buildFragment(node, findings, {
+        groupThreshold: settings.group_threshold,
+      });
       node.parentNode?.replaceChild(frag, node);
     }
-    const sel = cssPath(el);
-    const enriched = assignFindingIds(findings, elemId).map((f, i) => ({
+    const enriched = assignFindingIds(findings, elemId).map((f) => ({
       ...f,
       elementSelector: sel,
-      contextBefore: text.slice(Math.max(0, findings[i].offset - 20), findings[i].offset),
-      contextAfter: text.slice(findings[i].offset + (findings[i].codepoint > 0xFFFF ? 2 : 1), findings[i].offset + 21),
+      contextBefore: text.slice(Math.max(0, f.offset - 20), f.offset),
+      contextAfter: text.slice(
+        f.offset + (f.codepoint > 0xffff ? 2 : 1),
+        f.offset + 21,
+      ),
     }));
     elementFindings.push(...enriched);
   }
@@ -158,13 +190,13 @@ function scanElement(el) {
   allFindings.push(...elementFindings);
   setScannedText(elemId, originalText);
   observeTextChanges(el);
-  sendBatch(elementFindings, elemId);
+  sendFindings("FINDINGS_BATCH", elementFindings, elemId);
 }
 
 function rescanElement(el) {
   const elemId = getOrAssignElementId(el);
   // Remove old local findings for this element
-  allFindings = allFindings.filter(f => f.elementId !== elemId);
+  allFindings = allFindings.filter((f) => f.elementId !== elemId);
   let elementFindings = [];
   let originalText = "";
   withSuspendedObserver(() => {
@@ -179,7 +211,7 @@ function rescanElement(el) {
   });
   allFindings.push(...elementFindings);
   setScannedText(elemId, originalText);
-  sendReplace(elementFindings, elemId);
+  sendFindings("FINDINGS_REPLACE", elementFindings, elemId);
 }
 
 // Called when an element is removed from the DOM. Drops its findings from the
@@ -188,16 +220,25 @@ function rescanElement(el) {
 // doesn't keep contributing to signature matches or badge counts.
 function forgetElement(el) {
   const elemId = getOrAssignElementId(el);
-  allFindings = allFindings.filter(f => f.elementId !== elemId);
+  allFindings = allFindings.filter((f) => f.elementId !== elemId);
   removeScannedText(elemId);
   unobserveTextChanges(el);
-  sendReplace([], elemId);
+  sendFindings("FINDINGS_REPLACE", [], elemId);
 }
 
-function sendBatch(findings, elementId) {
+function sendFindings(type, findings, elementId) {
+  if (bulkScanInProgress) {
+    chrome.runtime.sendMessage({
+      type,
+      newFindings: findings,
+      sigMatches: [],
+      elementId,
+    });
+    return;
+  }
   const sigMatches = matchSignatures(getScannedText());
   chrome.runtime.sendMessage({
-    type: "FINDINGS_BATCH",
+    type,
     newFindings: findings,
     sigMatches,
     elementId,
@@ -205,14 +246,13 @@ function sendBatch(findings, elementId) {
   updateBanner(sigMatches);
 }
 
-function sendReplace(findings, elementId) {
+// One-shot signature pass. Called once at the end of a bulk sweep so
+// signature regexes scan the whole scanned-text mirror exactly once instead
+// of once per element. Posts a SIGNATURES_UPDATE so the background's
+// per-tab sigMatches catch up to reality.
+function flushSignaturesAndBanner() {
   const sigMatches = matchSignatures(getScannedText());
-  chrome.runtime.sendMessage({
-    type: "FINDINGS_REPLACE",
-    newFindings: findings,
-    sigMatches,
-    elementId,
-  });
+  chrome.runtime.sendMessage({ type: "SIGNATURES_UPDATE", sigMatches });
   updateBanner(sigMatches);
 }
 
@@ -222,7 +262,11 @@ function updateBanner(sigMatches) {
   removeBanner(document.body);
   if (allFindings.length > 0 || sigMatches.length > 0) {
     createBanner(
-      { totalFindings: allFindings.length, byTier, signatureMatches: sigMatches },
+      {
+        totalFindings: allFindings.length,
+        byTier,
+        signatureMatches: sigMatches,
+      },
       document.body,
       { t3Threshold: settings.banner_threshold_t3 },
     );
@@ -234,34 +278,61 @@ function cssPath(el) {
   let cur = el;
   while (cur && cur !== document.body) {
     let s = cur.tagName.toLowerCase();
-    if (cur.id) { parts.unshift(s + "#" + cur.id); break; }
-    const sibs = Array.from(cur.parentNode?.children ?? []).filter(c => c.tagName === cur.tagName);
-    if (sibs.length > 1) s += `:nth-child(${Array.from(cur.parentNode.children).indexOf(cur) + 1})`;
+    if (cur.id) {
+      parts.unshift(s + "#" + cur.id);
+      break;
+    }
+    const sibs = Array.from(cur.parentNode?.children ?? []).filter(
+      (c) => c.tagName === cur.tagName,
+    );
+    if (sibs.length > 1)
+      s += `:nth-child(${Array.from(cur.parentNode.children).indexOf(cur) + 1})`;
     parts.unshift(s);
     cur = cur.parentNode;
   }
   return parts.join(" > ");
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg.type === "RESCAN") {
-    for (const el of document.querySelectorAll(CODE_SEL)) {
-      if (processed.has(el)) rescanElement(el);
-      else scanElement(el);
+// Guard against double-registration if the bundle is ever evaluated twice
+// in the same isolated world (e.g. a future code path that re-injects on
+// the same page). __usent_installed gates init(); the same flag also gates
+// the runtime listener so we don't end up with two handlers running every
+// RESCAN twice and emitting duplicate findings.
+if (!window.__usent_installed) {
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg.type === "RESCAN") {
+      bulkScanInProgress = true;
+      for (const el of document.querySelectorAll(CODE_SEL)) {
+        if (processed.has(el)) rescanElement(el);
+        else scanElement(el);
+      }
+      bulkScanInProgress = false;
+      flushSignaturesAndBanner();
+      chrome.runtime.sendMessage({ type: "SCAN_READY" });
+      return undefined;
     }
-    return;
-  }
-  if (msg.type === "TOGGLE_MARKERS") {
-    document.querySelectorAll("span.usent-marker").forEach(s => {
-      s.style.display = s.style.display === "none" ? "" : "none";
-    });
-  }
-  if (msg.type === "GET_DOC_HASH") {
-    crypto.subtle.digest("SHA-256", new TextEncoder().encode(document.documentElement.outerHTML))
-      .then(buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join(""))
-      .then(hash => sendResponse(hash));
-    return true;
-  }
-});
+    if (msg.type === "TOGGLE_MARKERS") {
+      document.querySelectorAll("span.usent-marker").forEach((s) => {
+        s.style.display = s.style.display === "none" ? "" : "none";
+      });
+      return undefined;
+    }
+    if (msg.type === "GET_DOC_HASH") {
+      crypto.subtle
+        .digest(
+          "SHA-256",
+          new TextEncoder().encode(document.documentElement.outerHTML),
+        )
+        .then((buf) =>
+          Array.from(new Uint8Array(buf))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join(""),
+        )
+        .then((hash) => sendResponse(hash));
+      return true;
+    }
+    return undefined;
+  });
+}
 
 init();

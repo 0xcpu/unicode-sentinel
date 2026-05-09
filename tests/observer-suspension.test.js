@@ -4,7 +4,7 @@
 // mutations (wrapping suspicious codepoints with marker spans, or removing
 // markers before a re-scan) would be observed by the MutationObserver and
 // dispatched as text-change events, triggering a re-scan, which mutated again,
-// which fired the observer again — an infinite feedback loop that made new
+// which fired the observer again - an infinite feedback loop that made new
 // tabs unusable.
 //
 // The fix is to suspend the observer around scan-triggered DOM mutations:
@@ -55,14 +55,14 @@ test("disconnect/takeRecords/observe prevents self-triggered callbacks", async (
   await flush();
   mo.disconnect();
 
-  // No callbacks should have fired — mutations happened while disconnected.
+  // No callbacks should have fired - mutations happened while disconnected.
   expect(calls.added).toBe(0);
   expect(calls.changed).toBe(0);
   expect(calls.removed).toBe(0);
 });
 
 test("page-caused mutations still fire after suspended scan completes", async () => {
-  // This proves the suspension pattern is scoped — after reconnect, legitimate
+  // This proves the suspension pattern is scoped - after reconnect, legitimate
   // page mutations are still detected. Without this, the C2 fix would regress.
   const changed = [];
   const mo = makeMutationObserver({
@@ -76,11 +76,11 @@ test("page-caused mutations still fire after suspended scan completes", async ()
   // Simulated scan (no suspicious chars to wrap, but the suspend/reconnect
   // cycle should still leave the observer operational).
   mo.disconnect();
-  // (no-op scan — clean text produces no mutations)
+  // (no-op scan - clean text produces no mutations)
   mo.takeRecords();
   mo.observe(document.body, MO_CONFIG);
 
-  // Page JS appends a suspicious text node — must fire onChanged(pre).
+  // Page JS appends a suspicious text node - must fire onChanged(pre).
   pre.appendChild(document.createTextNode("\uFE00"));
 
   await flush();
@@ -109,7 +109,7 @@ test("per-element characterData observer catches in-place text edits", async () 
 });
 
 test("performance: per-element observer ignores text edits outside its scope", async () => {
-  // Core performance property — a characterData edit elsewhere on the page
+  // Core performance property - a characterData edit elsewhere on the page
   // must NOT fire the per-element observer. Without this, the old
   // body-level `characterData: true, subtree: true` config generated
   // callback storms that froze the browser.
@@ -149,7 +149,7 @@ test("repeated scan + rescan cycles do not accumulate callbacks (no feedback loo
   document.body.appendChild(pre);
   mo.observe(document.body, MO_CONFIG);
 
-  // Simulated initial scan — wrap codepoints (suspended).
+  // Simulated initial scan - wrap codepoints (suspended).
   mo.disconnect();
   const t1 = pre.firstChild;
   const f1 = scanText(t1.textContent);
@@ -165,7 +165,7 @@ test("repeated scan + rescan cycles do not accumulate callbacks (no feedback loo
   expect(changedCount).toBeGreaterThanOrEqual(1);
   const afterPageMutation = changedCount;
 
-  // Simulated rescan — remove markers, re-wrap (suspended).
+  // Simulated rescan - remove markers, re-wrap (suspended).
   mo.disconnect();
   removeMarkers(pre);
   const t2 = pre.firstChild; // now a single reconstructed text node

@@ -6,6 +6,7 @@
 
 import {
   handleMessage, getTabState, resetAllState, resetTabState, onTabUpdated,
+  markTabUnsupported,
 } from "../src/background/background.js";
 
 beforeEach(() => {
@@ -183,7 +184,7 @@ test("tab cleanup: removing tab deletes all state", () => {
 });
 
 test("TRIGGER_SCAN: creates placeholder state with status=scanning", () => {
-  handleMessage({ type: "TRIGGER_SCAN" }, fakeSender(10));
+  handleMessage({ type: "TRIGGER_SCAN", tabId: 10 }, { id: "popup-origin" });
   const state = getTabState(10);
   expect(state).not.toBeNull();
   expect(state.status).toBe("scanning");
@@ -194,13 +195,13 @@ test("TRIGGER_SCAN: creates placeholder state with status=scanning", () => {
 });
 
 test("TRIGGER_SCAN: GET_FINDINGS surfaces the scanning status", () => {
-  handleMessage({ type: "TRIGGER_SCAN" }, fakeSender(10));
+  handleMessage({ type: "TRIGGER_SCAN", tabId: 10 }, { id: "popup-origin" });
   const state = handleMessage({ type: "GET_FINDINGS", tabId: 10 }, fakeSender(10));
   expect(state.status).toBe("scanning");
 });
 
 test("TRIGGER_SCAN: FINDINGS_BATCH preserves the status field", () => {
-  handleMessage({ type: "TRIGGER_SCAN" }, fakeSender(10));
+  handleMessage({ type: "TRIGGER_SCAN", tabId: 10 }, { id: "popup-origin" });
   handleMessage(
     { type: "FINDINGS_BATCH", newFindings: [{ id: 1, tier: "T1", elementId: 1 }], sigMatches: [], elementId: 1 },
     fakeSender(10)
@@ -222,13 +223,13 @@ test("TRIGGER_SCAN: resets any prior findings on the tab", () => {
     fakeSender(10)
   );
   expect(getTabState(10).total).toBe(1);
-  handleMessage({ type: "TRIGGER_SCAN" }, fakeSender(10));
+  handleMessage({ type: "TRIGGER_SCAN", tabId: 10 }, { id: "popup-origin" });
   expect(getTabState(10).total).toBe(0);
   expect(getTabState(10).status).toBe("scanning");
 });
 
 test("SCAN_READY: drops the status field but preserves findings", () => {
-  handleMessage({ type: "TRIGGER_SCAN" }, fakeSender(10));
+  handleMessage({ type: "TRIGGER_SCAN", tabId: 10 }, { id: "popup-origin" });
   handleMessage(
     { type: "FINDINGS_BATCH", newFindings: [{ id: 1, tier: "T1", elementId: 1 }], sigMatches: [], elementId: 1 },
     fakeSender(10)
@@ -240,7 +241,7 @@ test("SCAN_READY: drops the status field but preserves findings", () => {
 });
 
 test("SCAN_READY: clears status on a page with zero findings", () => {
-  handleMessage({ type: "TRIGGER_SCAN" }, fakeSender(10));
+  handleMessage({ type: "TRIGGER_SCAN", tabId: 10 }, { id: "popup-origin" });
   handleMessage({ type: "SCAN_READY" }, fakeSender(10));
   const state = getTabState(10);
   expect(state.status).toBeUndefined();
@@ -260,7 +261,7 @@ test("SCAN_READY: ignored when sender has no tab", () => {
 });
 
 test("onTabUpdated: status=loading clears tab state", () => {
-  handleMessage({ type: "TRIGGER_SCAN" }, fakeSender(10));
+  handleMessage({ type: "TRIGGER_SCAN", tabId: 10 }, { id: "popup-origin" });
   handleMessage(
     { type: "FINDINGS_BATCH", newFindings: [{ id: 1, tier: "T1", elementId: 1 }], sigMatches: [], elementId: 1 },
     fakeSender(10)
@@ -271,13 +272,13 @@ test("onTabUpdated: status=loading clears tab state", () => {
 });
 
 test("onTabUpdated: status=complete does NOT clear state", () => {
-  handleMessage({ type: "TRIGGER_SCAN" }, fakeSender(10));
+  handleMessage({ type: "TRIGGER_SCAN", tabId: 10 }, { id: "popup-origin" });
   onTabUpdated(10, { status: "complete" });
   expect(getTabState(10)).not.toBeNull();
 });
 
 test("onTabUpdated: unrelated changeInfo is a no-op", () => {
-  handleMessage({ type: "TRIGGER_SCAN" }, fakeSender(10));
+  handleMessage({ type: "TRIGGER_SCAN", tabId: 10 }, { id: "popup-origin" });
   onTabUpdated(10, { title: "new title" });
   expect(getTabState(10)).not.toBeNull();
 });
@@ -286,4 +287,86 @@ test("TRIGGER_SCAN: accepts tabId from msg when sender has no tab (popup origin)
   handleMessage({ type: "TRIGGER_SCAN", tabId: 55 }, { id: "popup-origin" });
   expect(getTabState(55)).not.toBeNull();
   expect(getTabState(55).status).toBe("scanning");
+});
+
+test("TRIGGER_SCAN: rejected when sender is a content script (popup-only contract)", () => {
+  // Defense in depth: a content script bug should not be able to wipe
+  // tab state by issuing TRIGGER_SCAN. Only the popup may trigger scans.
+  const result = handleMessage({ type: "TRIGGER_SCAN" }, { tab: { id: 10 } });
+  expect(result).toBeUndefined();
+  expect(getTabState(10)).toBeNull();
+});
+
+test("TRIGGER_SCAN: a tab message with explicit msg.tabId is also rejected", () => {
+  const result = handleMessage({ type: "TRIGGER_SCAN", tabId: 99 }, { tab: { id: 10 } });
+  expect(result).toBeUndefined();
+  expect(getTabState(99)).toBeNull();
+  expect(getTabState(10)).toBeNull();
+});
+
+test("markTabUnsupported: only wipes findings when status was 'scanning' (defensive contract)", () => {
+  // Seed state from a completed scan: SCAN_READY clears 'status'.
+  handleMessage({ type: "TRIGGER_SCAN", tabId: 10 }, { id: "popup-origin" });
+  handleMessage(
+    { type: "FINDINGS_BATCH", newFindings: [{ id: 1, tier: "T1", elementId: 1 }], sigMatches: [], elementId: 1 },
+    fakeSender(10),
+  );
+  handleMessage({ type: "SCAN_READY" }, fakeSender(10));
+  expect(getTabState(10).status).toBeUndefined();
+  expect(getTabState(10).total).toBe(1);
+  // A spurious markTabUnsupported on a completed scan must NOT wipe findings.
+  markTabUnsupported(10);
+  expect(getTabState(10).total).toBe(1);
+  expect(getTabState(10).status).toBeUndefined();
+});
+
+test("SIGNATURES_UPDATE: replaces sigMatches without touching findings or byTier", () => {
+  handleMessage(
+    { type: "FINDINGS_BATCH", newFindings: [
+      { id: 1, tier: "T2", elementId: 1 },
+      { id: 2, tier: "T3", elementId: 1 },
+    ], sigMatches: [], elementId: 1 },
+    fakeSender(10),
+  );
+  handleMessage(
+    { type: "SIGNATURES_UPDATE", sigMatches: [{ id: "GW-DECODE-02" }] },
+    fakeSender(10),
+  );
+  const state = getTabState(10);
+  expect(state.findings).toHaveLength(2);
+  expect(state.byTier).toEqual({ T1: 0, T2: 1, T3: 1 });
+  expect(state.sigMatches).toEqual([{ id: "GW-DECODE-02" }]);
+});
+
+test("SIGNATURES_UPDATE: no-op when tab has no state", () => {
+  const result = handleMessage(
+    { type: "SIGNATURES_UPDATE", sigMatches: [{ id: "X" }] },
+    fakeSender(99),
+  );
+  expect(result).toBeUndefined();
+  expect(getTabState(99)).toBeNull();
+});
+
+test("markTabUnsupported: sets status='unsupported' and clears findings", () => {
+  // The wiring layer calls this when chrome.scripting.executeScript rejects
+  // (chrome:// pages, restricted URLs, missing host permission, etc).
+  handleMessage({ type: "TRIGGER_SCAN", tabId: 10 }, { id: "popup-origin" });
+  expect(getTabState(10).status).toBe("scanning");
+  markTabUnsupported(10);
+  const state = getTabState(10);
+  expect(state.status).toBe("unsupported");
+  expect(state.findings).toEqual([]);
+  expect(state.total).toBe(0);
+});
+
+test("markTabUnsupported: no-op when tab has no state (avoid resurrecting cleaned-up tabs)", () => {
+  markTabUnsupported(99);
+  expect(getTabState(99)).toBeNull();
+});
+
+test("GET_FINDINGS: surfaces 'unsupported' status so the popup can show a distinct UI", () => {
+  handleMessage({ type: "TRIGGER_SCAN", tabId: 10 }, { id: "popup-origin" });
+  markTabUnsupported(10);
+  const state = handleMessage({ type: "GET_FINDINGS", tabId: 10 }, fakeSender(10));
+  expect(state.status).toBe("unsupported");
 });

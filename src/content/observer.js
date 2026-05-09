@@ -1,13 +1,15 @@
 export function makeIntersectionObserver(onVisible) {
   return new IntersectionObserver(
-    (entries) => { for (const e of entries) if (e.isIntersecting) onVisible(e.target); },
-    { rootMargin: "200px" }
+    (entries) => {
+      for (const e of entries) if (e.isIntersecting) onVisible(e.target);
+    },
+    { rootMargin: "200px" },
   );
 }
 
 // Dispatches element-level events to callbacks:
 // - onAdded(el): an element has been added to the DOM
-// - onChanged(el): text inside an already-present element has changed —
+// - onChanged(el): text inside an already-present element has changed -
 //   fires for characterData mutations AND for text-node insertions into
 //   an existing element (both represent "text inside el changed")
 // - onRemoved(el): an element has been removed from the DOM

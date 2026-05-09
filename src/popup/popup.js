@@ -2,7 +2,7 @@ import { buildExportPayload, canonicalHash } from "../export/exporter.js";
 import { getSettings } from "../shared/storage.js";
 
 function show(id) {
-  for (const sec of ["scan-empty", "scanning", "scanned", "scan-failed"]) {
+  for (const sec of ["scan-empty", "scanning", "scanned", "scan-failed", "scan-unsupported"]) {
     const el = document.getElementById(sec);
     if (el) el.style.display = sec === id ? "block" : "none";
   }
@@ -12,16 +12,41 @@ function clearChildren(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
 
+export function safeHostname(url) {
+  try {
+    return new URL(url).hostname || "page";
+  } catch {
+    return "page";
+  }
+}
+
+// Polls GET_FINDINGS until status is no longer 'scanning'. The first poll
+// fires immediately so a scan that finishes before the first interval doesn't
+// stall the UI for `intervalMs`.
 async function pollUntilScanned(tabId, { intervalMs = 200, timeoutMs = 5000 } = {}) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    await new Promise(r => setTimeout(r, intervalMs));
     const s = await chrome.runtime
       .sendMessage({ type: "GET_FINDINGS", tabId })
       .catch(() => null);
     if (s && s.status !== "scanning") return s;
+    await new Promise(r => setTimeout(r, intervalMs));
   }
   return null;
+}
+
+function renderTerminal(tab, state) {
+  if (!state) { show("scan-empty"); return; }
+  if (state.status === "unsupported") { show("scan-unsupported"); return; }
+  renderScanned(tab, state);
+}
+
+async function runScan(tab) {
+  chrome.runtime.sendMessage({ type: "TRIGGER_SCAN", tabId: tab.id });
+  show("scanning");
+  const final = await pollUntilScanned(tab.id);
+  if (!final) { show("scan-failed"); return; }
+  renderTerminal(tab, final);
 }
 
 async function init() {
@@ -31,44 +56,40 @@ async function init() {
     return;
   }
 
-  // Wire retry-btn early — it's used whenever scan-failed is shown, which
-  // happens from multiple code paths (initial poll, post-click poll).
-  document.getElementById("retry-btn")?.addEventListener("click", async () => {
-    chrome.runtime.sendMessage({ type: "TRIGGER_SCAN", tabId: tab.id });
-    show("scanning");
-    const final = await pollUntilScanned(tab.id);
-    if (final) renderScanned(tab, final);
-    else show("scan-failed");
+  // Wire all the buttons once. Each handler is short and tab-bound here so
+  // we don't risk re-binding during render flips between scan-empty,
+  // scanning, scanned, scan-failed, and scan-unsupported sections.
+  document.getElementById("scan-btn")?.addEventListener("click", () => runScan(tab));
+  document.getElementById("retry-btn")?.addEventListener("click", () => runScan(tab));
+  document.getElementById("rescan-btn")?.addEventListener("click", () => {
+    chrome.tabs.sendMessage(tab.id, { type: "RESCAN" });
   });
+  document.getElementById("btn-toggle")?.addEventListener("click", () => {
+    chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_MARKERS" });
+  });
+  document.getElementById("btn-export")?.addEventListener("click", () => exportReport(tab));
 
   const state = await chrome.runtime
     .sendMessage({ type: "GET_FINDINGS", tabId: tab.id })
     .catch(() => null);
 
-  if (state && state.status === "scanning") {
+  if (state?.status === "scanning") {
     show("scanning");
     const final = await pollUntilScanned(tab.id);
-    if (final) renderScanned(tab, final);
-    else show("scan-failed");
+    if (!final) { show("scan-failed"); return; }
+    renderTerminal(tab, final);
     return;
   }
 
-  if (!state) {
-    show("scan-empty");
-    document.getElementById("scan-btn").addEventListener("click", async () => {
-      chrome.runtime.sendMessage({ type: "TRIGGER_SCAN", tabId: tab.id });
-      show("scanning");
-      const final = await pollUntilScanned(tab.id);
-      if (final) renderScanned(tab, final);
-      else show("scan-failed");
-    });
-    return;
-  }
-
-  renderScanned(tab, state);
+  renderTerminal(tab, state);
 }
 
+// Last-seen scan state, updated by renderScanned. The export button reads
+// from this so the closure captures whatever was last rendered.
+let lastState = null;
+
 function renderScanned(tab, state) {
+  lastState = state;
   show("scanned");
 
   const dot = document.getElementById("dot");
@@ -120,39 +141,33 @@ function renderScanned(tab, state) {
       const tdId = document.createElement("td"); tdId.textContent = f.id; tr.appendChild(tdId);
       const tdCp = document.createElement("td"); tdCp.textContent = "U+" + f.codepoint.toString(16).toUpperCase().padStart(4, "0"); tr.appendChild(tdCp);
       const tdTier = document.createElement("td"); tdTier.textContent = f.tier; tr.appendChild(tdTier);
-      const tdCtx = document.createElement("td"); tdCtx.textContent = (f.contextBefore ?? "") + "\u2026"; tr.appendChild(tdCtx);
+      const tdCtx = document.createElement("td"); tdCtx.textContent = (f.contextBefore ?? "") + "…"; tr.appendChild(tdCtx);
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
     list.appendChild(table);
   }
+}
 
-  document.getElementById("btn-toggle").addEventListener("click", () => {
-    chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_MARKERS" });
-  });
-
-  document.getElementById("btn-export").addEventListener("click", async () => {
-    const exportSettings = await getSettings();
-    const docHash = await chrome.tabs.sendMessage(tab.id, { type: "GET_DOC_HASH" }).catch(() => "");
-    const payload = buildExportPayload(
-      { url: tab.url, title: tab.title, documentHash: docHash },
-      findings,
-      sigMatches,
-      { redactUrls: exportSettings.export_redact_urls, stripContext: exportSettings.export_strip_context }
-    );
-    payload.integrity.findings_hash_sha256 = await canonicalHash(findings);
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = "usent-report-" + new URL(tab.url).hostname + "-" + new Date().toISOString().slice(0, 19).replace(/:/g, "-") + ".json";
-    a.click();
-    URL.revokeObjectURL(blobUrl);
-  });
-
-  document.getElementById("rescan-btn").addEventListener("click", () => {
-    chrome.tabs.sendMessage(tab.id, { type: "RESCAN" });
-  });
+async function exportReport(tab) {
+  if (!lastState) return;
+  const { findings, sigMatches } = lastState;
+  const exportSettings = await getSettings();
+  const docHash = await chrome.tabs.sendMessage(tab.id, { type: "GET_DOC_HASH" }).catch(() => "");
+  const payload = buildExportPayload(
+    { url: tab.url, title: tab.title, documentHash: docHash },
+    findings,
+    sigMatches,
+    { redactUrls: exportSettings.export_redact_urls, stripContext: exportSettings.export_strip_context },
+  );
+  payload.integrity.findings_hash_sha256 = await canonicalHash(findings);
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = "usent-report-" + safeHostname(tab.url) + "-" + new Date().toISOString().slice(0, 19).replace(/:/g, "-") + ".json";
+  a.click();
+  URL.revokeObjectURL(blobUrl);
 }
 
 init();

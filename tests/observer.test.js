@@ -1,7 +1,7 @@
 // tests/observer.test.js
 //
 // Tests for the MutationObserver helper. These verify that characterData
-// mutations and removedNodes are dispatched to the right callbacks — the
+// mutations and removedNodes are dispatched to the right callbacks - the
 // feature needed for S1 (re-scan on text change) and for the no-stale-text
 // fix (signature matches must not reflect removed DOM).
 
@@ -83,7 +83,7 @@ test("only provided callbacks are invoked (no onChanged means no dispatch)", asy
   mo.observe(c, { childList: true, subtree: true, characterData: true });
 
   p.firstChild.data = "changed";
-  // this should NOT throw — missing callback is a no-op
+  // this should NOT throw - missing callback is a no-op
   await flush();
   mo.disconnect();
   expect(added).toEqual([]); // no new element added, just text changed
@@ -140,7 +140,7 @@ test("no false positives: unobserved mutations do not invoke callbacks", async (
     onRemoved: (el) => removed.push(el),
   });
   const c = mkContainer();
-  // not observing yet — this mutation should not fire
+  // not observing yet - this mutation should not fire
   c.appendChild(document.createElement("pre"));
   await flush();
   expect(added).toEqual([]);

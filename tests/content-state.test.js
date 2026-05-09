@@ -1,12 +1,16 @@
 // tests/content-state.test.js
 //
 // Tests for content script state helpers extracted as pure functions.
-// DOM and Chrome API interactions are not tested here — those are
+// DOM and Chrome API interactions are not tested here - those are
 // integration concerns.
 
 import {
-  assignFindingIds, resetIdCounter,
-  setScannedText, getScannedText, removeScannedText, resetScannedText,
+  assignFindingIds,
+  resetIdCounter,
+  setScannedText,
+  getScannedText,
+  removeScannedText,
+  resetScannedText,
 } from "../src/content/content-state.js";
 
 beforeEach(() => {
